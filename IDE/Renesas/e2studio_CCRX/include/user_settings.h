@@ -26,22 +26,58 @@
 #ifndef H_USER_SETTINGS_
 #define H_USER_SETTINGS_
 
-#include <target.h>
 
+//#define WOLFBOOT_RENESAS_TSIP
+//#define WOLFBOOT_DUALBOOT
+
+#ifdef WOLFBOOT_RENESAS_TSIP
+    #define WOLFSSL_RENESAS_TSIP_SIGNATURE // Current version support only RSA2048
+    #define WOLFSSL_NO_SW_MATH
+    #define WOLFBOOT_SIGN_RSA2048
+#else
+    /* #define WOLFBOOT_SIGN_RSA2048 */
+    /* #defube WOLFBOOT_SIGN_RSA3072 */
+    /* #defube WOLFBOOT_SIGN_RSA4096 */
+    /* #define WOLFBOOT_SIGN_ED25519 */
+    /* #define WOLFBOOT_SIGN_ED488   */
+       #define WOLFBOOT_SIGN_ECC256
+    /* #define WOLFBOOT_SIGN_ECC384  */
+    /* #define WOLFBOOT_SIGN_ECC521  */
+#endif
+
+#define WOLFBOOT_FIXED_PARTITIONS
+
+#ifdef WOLFBOOT_DUALBOOT
+    #define FLASH_IN_DUAL_BANK_MODE (1)
+    #define DUALBANK_SWAP
+#endif
+
+#define WOLFBOOT_HASH_SHA256
+
+#include "rx72n/r_flash_rx72n.h"
+
+#define FLASHBUFFER_SIZE WOLFBOOT_SECTOR_SIZE
+#define WOLFSSL_HAVE_MIN
+#define WOLFSSL_HAVE_MAX
+#define WC_NO_RNG_SIMPLE
+
+#define WOLFSSL_USER_SETTINGS   /* for renesas-tsip-crypt.h */
+#define WOLFSSL_SP_MATH_ALL                /* for sp_int.c */
+//#define USE_FAST_MATH
 /* System */
 #define WOLFSSL_GENERAL_ALIGNMENT 4
 #define SINGLE_THREADED
 #define WOLFCRYPT_ONLY
 #define SIZEOF_LONG_LONG 8
 
-#define CTYPE_USER /* don't let wolfCrypt types.h include ctype.h */
-extern int toupper(int c);
-extern int tolower(int c);
-#define XTOUPPER(c)     toupper((c))
-#define XTOLOWER(c)     tolower((c))
-
 #ifdef USE_FAST_MATH
 #   define WC_NO_HARDEN
+#endif
+
+#if defined(WOLFBOOT_SIGN_RSA2048) || defined(WOLFBOOT_SIGN_RSA3072) || defined(WOLFBOOT_SIGN_ED448)
+    #define IMAGE_HEADER_SIZE 512
+#elif defined(WOLFBOOT_SIGN_RSA4096)
+    #define IMAGE_HEADER_SIZE 1024
 #endif
 
 /* ED25519 and SHA512 */
@@ -70,13 +106,13 @@ extern int tolower(int c);
 #endif
 
 /* ECC and SHA256 */
-#if defined(WOLFBOOT_SIGN_ECC256) ||\
-    defined(WOLFBOOT_SIGN_ECC384) ||\
-    defined(WOLFBOOT_SIGN_ECC521)
-
+#if defined (WOLFBOOT_SIGN_ECC256) ||\
+    defined (WOLFBOOT_SIGN_ECC384) ||\
+    defined (WOLFBOOT_SIGN_ECC521)
 #   define HAVE_ECC
 #   define ECC_TIMING_RESISTANT
-#   define ECC_USER_CURVES /* enables only 256-bit by default */
+
+
 
 /* Kinetis LTC support */
 #   ifdef FREESCALE_USE_LTC
@@ -88,12 +124,15 @@ extern int tolower(int c);
 #   endif
 
 /* SP MATH */
-#   if !defined(USE_FAST_MATH) && !defined(WOLFSSL_SP_MATH_ALL)
+#ifndef WOLFSSL_NO_SW_MATH
+#   ifndef USE_FAST_MATH
 #       define WOLFSSL_SP
 #       define WOLFSSL_SP_MATH
 #       define WOLFSSL_SP_SMALL
+#       define SP_WORD_SIZE 32
 #       define WOLFSSL_HAVE_SP_ECC
 #   endif
+#endif
 
 /* ECC options disabled to reduce size */
 #   define NO_ECC_SIGN
@@ -102,25 +141,25 @@ extern int tolower(int c);
 #   define NO_ECC_KEY_EXPORT
 
 /* Curve */
+#   define NO_ECC192
+#   define NO_ECC224
 #ifdef WOLFBOOT_SIGN_ECC256
 #   define HAVE_ECC256
 #   define FP_MAX_BITS (256 + 32)
-#elif defined(WOLFBOOT_SIGN_ECC384)
+#   define NO_ECC384
+#   define NO_ECC521
+#elif defined WOLFBOOT_SIGN_ECC384
 #   define HAVE_ECC384
-#   define FP_MAX_BITS (384 * 2)
-#   if !defined(USE_FAST_MATH) && !defined(WOLFSSL_SP_MATH_ALL)
-#       define WOLFSSL_SP_384
-#       define WOLFSSL_SP_NO_256
-#   endif
+#   define FP_MAX_BITS (1024 + 32)
+#   define WOLFSSL_SP_384
+#   define WOLFSSL_SP_NO_256
 #   define NO_ECC256
-#elif defined(WOLFBOOT_SIGN_ECC521)
+#   define NO_ECC521
+#elif defined WOLFBOOT_SIGN_ECC521
 #   define HAVE_ECC521
-#   define FP_MAX_BITS (528 * 2)
-#   if !defined(USE_FAST_MATH) && !defined(WOLFSSL_SP_MATH_ALL)
-#       define WOLFSSL_SP_521
-#       define WOLFSSL_SP_NO_256
-#   endif
+#   define FP_MAX_BITS (544 + 32)
 #   define NO_ECC256
+#   define NO_ECC384
 #endif
 
 #   define NO_RSA
@@ -134,15 +173,17 @@ extern int tolower(int c);
 #   define WC_NO_RSA_OAEP
 #   define FP_MAX_BITS (2048 * 2)
     /* sp math */
-#   if !defined(USE_FAST_MATH) && !defined(WOLFSSL_SP_MATH_ALL)
+#ifndef WOLFSSL_NO_SW_MATH
+#   ifndef USE_FAST_MATH
 #       define WOLFSSL_HAVE_SP_RSA
 #       define WOLFSSL_SP
 #       define WOLFSSL_SP_SMALL
 #       define WOLFSSL_SP_MATH
+#       define SP_WORD_SIZE 32
 #       define WOLFSSL_SP_NO_3072
 #       define WOLFSSL_SP_NO_4096
 #   endif
-#   define WC_ASN_HASH_SHA256
+#endif
 #endif
 
 #ifdef WOLFBOOT_SIGN_RSA3072
@@ -152,15 +193,17 @@ extern int tolower(int c);
 #   define WC_NO_RSA_OAEP
 #   define FP_MAX_BITS (3072 * 2)
     /* sp math */
-#   if !defined(USE_FAST_MATH) && !defined(WOLFSSL_SP_MATH_ALL)
+#ifndef WOLFSSL_NO_SW_MATH
+#   ifndef USE_FAST_MATH
 #       define WOLFSSL_HAVE_SP_RSA
 #       define WOLFSSL_SP
 #       define WOLFSSL_SP_SMALL
 #       define WOLFSSL_SP_MATH
+#       define SP_WORD_SIZE 32
 #       define WOLFSSL_SP_NO_2048
 #       define WOLFSSL_SP_NO_4096
 #   endif
-#   define WC_ASN_HASH_SHA256
+#endif
 #endif
 
 #ifdef WOLFBOOT_SIGN_RSA4096
@@ -170,46 +213,28 @@ extern int tolower(int c);
 #   define WC_NO_RSA_OAEP
 #   define FP_MAX_BITS (4096 * 2)
     /* sp math */
-#   if !defined(USE_FAST_MATH) && !defined(WOLFSSL_SP_MATH_ALL)
+#ifndef WOLFSSL_NO_SW_MATH
+#   ifndef USE_FAST_MATH
 #       define WOLFSSL_HAVE_SP_RSA
 #       define WOLFSSL_SP
 #       define WOLFSSL_SP_SMALL
 #       define WOLFSSL_SP_MATH
+#       define SP_WORD_SIZE 32
 #       define WOLFSSL_SP_4096
 #       define WOLFSSL_SP_NO_2048
 #       define WOLFSSL_SP_NO_3072
 #   endif
-#   define WC_ASN_HASH_SHA256
+#endif
 #endif
 
 #ifdef WOLFBOOT_HASH_SHA3_384
 #   define WOLFSSL_SHA3
-#   ifdef NO_RSA
-#       define NO_SHA256
-#   endif
+#   define NO_SHA256
 #endif
 
 #ifdef WOLFBOOT_HASH_SHA384
 #   define WOLFSSL_SHA384
-#   ifdef NO_RSA
-#       define NO_SHA256
-#   endif
-#endif
-
-/* If SP math is enabled determine word size */
-#if defined(WOLFSSL_HAVE_SP_ECC) || defined(WOLFSSL_HAVE_SP_RSA)
-#   ifdef __aarch64__
-#       define HAVE___UINT128_T
-#       define WOLFSSL_SP_ARM64_ASM
-#       define SP_WORD_SIZE 64
-#   else
-#       define SP_WORD_SIZE 32
-#   endif
-
-        /* SP Math needs to understand long long */
-#   ifndef ULLONG_MAX
-#       define ULLONG_MAX 18446744073709551615ULL
-#   endif
+#   define NO_SHA256
 #endif
 
 #ifdef EXT_ENCRYPTED
@@ -272,10 +297,8 @@ extern int tolower(int c);
 #   endif
 #   define WOLFSSL_NO_MALLOC
 #else
-#   if defined(WOLFBOOT_HUGE_STACK)
-#       error "Cannot use SMALL_STACK=1 with HUGE_STACK=1"
-#endif
 #   define WOLFSSL_SMALL_STACK
 #endif
+
 
 #endif /* !H_USER_SETTINGS_ */
