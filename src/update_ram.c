@@ -151,7 +151,11 @@ void RAMFUNCTION wolfBoot_start(void)
 
     #ifdef WOLFBOOT_USE_RAMBOOT
         load_address = (uint32_t*)(WOLFBOOT_LOAD_ADDRESS -
+#ifdef _RENESAS_RZN_
+            IMAGE_HEADER_SIZE/4);
+#else
             IMAGE_HEADER_SIZE);
+#endif
       #if defined(EXT_ENCRYPTED) && defined(MMU)
         ret = wolfBoot_ram_decrypt((uint8_t*)source_address,
             (uint8_t*)load_address);
@@ -165,7 +169,6 @@ void RAMFUNCTION wolfBoot_start(void)
     #else
         load_address = source_address;
     #endif
-
     #if !defined(WOLFBOOT_FIXED_PARTITIONS) || \
             defined(WOLFBOOT_USE_RAMBOOT)
         ret = wolfBoot_open_image_address(&os_image, (uint8_t*)load_address);
