@@ -70,7 +70,7 @@ void dummy_loader()
          //.text.local_system_init
          //0x10010674       0x30 ./src/local_system_init.o
          //0x10010674                local_system_init
-         app_prg = (void(*))(0x10010228);
+         app_prg = (void(*))(0x10010000);
          /* Jump to the application project */
          app_prg();
 }

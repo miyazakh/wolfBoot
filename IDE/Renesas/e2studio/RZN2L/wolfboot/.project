@@ -187,11 +187,6 @@
 			<locationURI>PARENT-5-PROJECT_LOC/lib/wolfssl/wolfcrypt/src/sp_int.c</locationURI>
 		</link>
 		<link>
-			<name>src/wolfcrypt/tfm.c</name>
-			<type>1</type>
-			<locationURI>PARENT-5-PROJECT_LOC/lib/wolfssl/wolfcrypt/src/tfm.c</locationURI>
-		</link>
-		<link>
 			<name>src/wolfcrypt/wc_port.c</name>
 			<type>1</type>
 			<locationURI>PARENT-5-PROJECT_LOC/lib/wolfssl/wolfcrypt/src/wc_port.c</locationURI>

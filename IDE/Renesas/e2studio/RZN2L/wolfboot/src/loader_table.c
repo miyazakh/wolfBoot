@@ -33,7 +33,8 @@ extern uint32_t IMAGE_APP_FLASH_section_start;
 extern uint32_t IMAGE_APP_FLASH_section_size;
 
  #define application_prg_flash_addr (&IMAGE_APP_FLASH_section_start)
- #define application_prg_start_addr (&IMAGE_APP_RAM_start-(512/4))
+ //#define application_prg_start_addr (&IMAGE_APP_RAM_start-(512/4))
+ #define application_prg_start_addr (&IMAGE_APP_RAM_start)
  #define application_prg_size       (&IMAGE_APP_FLASH_section_size)
 
 #endif

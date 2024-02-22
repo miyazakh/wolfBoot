@@ -29,10 +29,7 @@
 #define WOLFBOOT_LOADER_MAIN
 #define EXT_FLASH
 #define NO_XIP
-
-//#define XMEMCPY(d,s,l)    rz_memcopy((s),(d),(l))
-/* For SCE use, please enable the following line. */
-/* #define WOLFBOOT_RENESAS_SCEPROTECT */
+#define WOLFBOOT_DUALBOOT
 
 #define WOLFBOOT_SIGN_RSA2048
 /* #defube WOLFBOOT_SIGN_RSA3072 */
@@ -43,10 +40,10 @@
 /* #define WOLFBOOT_SIGN_ECC384  */
 /* #define WOLFBOOT_SIGN_ECC521  */
 
-#ifdef WOLFBOOT_DUALBOOT
+/*#ifdef WOLFBOOT_DUALBOOT
     #define FLASH_IN_DUAL_BANK_MODE (1)
     #define DUALBANK_SWAP
-#endif
+#endif*/
 
 #define WOLFBOOT_HASH_SHA256
 
@@ -54,7 +51,6 @@
 #define WC_NO_RNG_SIMPLE
 
 #define WOLFSSL_SP_MATH_ALL                /* for sp_int.c */
-//#define USE_FAST_MATH
 /* System */
 #define WOLFSSL_GENERAL_ALIGNMENT 4
 #define SINGLE_THREADED

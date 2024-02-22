@@ -36,18 +36,20 @@
 extern uint32_t IMAGE_APP_RAM_start;
 extern uint32_t IMAGE_APP_FLASH_section_start;
 extern uint32_t IMAGE_APP_FLASH_section_size;
+extern uint32_t IMAGE_APP_FLASH_update_start;
+extern uint32_t IMAGE_APP_FLASH_update_size;
 
-#define WOLFBOOT_FLASH_ADDR                 &IMAGE_APP_FLASH_section_start
-#define WOLFBOOT_FLASH_SIZE                 &IMAGE_APP_FLASH_section_size
+#define WOLFBOOT_FLASH_ADDR                 0x60100000 /* &IMAGE_APP_FLASH_section_start */
+#define WOLFBOOT_FLASH_SIZE                 0x100000
 
 #define WOLFBOOT_SECTOR_SIZE                0x10000
 #define WOLFBOOT_PARTITION_SIZE             0x60000
 
-#define WOLFBOOT_PARTITION_BOOT_ADDRESS     &IMAGE_APP_FLASH_section_start
-#define WOLFBOOT_PARTITION_UPDATE_ADDRESS   0x80000
-#define WOLFBOOT_PARTITION_SWAP_ADDRESS     0xf0000
+#define WOLFBOOT_PARTITION_BOOT_ADDRESS     WOLFBOOT_FLASH_ADDR
+#define WOLFBOOT_PARTITION_UPDATE_ADDRESS   (WOLFBOOT_FLASH_ADDR + 0x80000)
+#define WOLFBOOT_PARTITION_SWAP_ADDRESS     WOLFBOOT_FLASH_ADDR + 0xf0000
 
 
-#define WOLFBOOT_LOAD_ADDRESS               &IMAGE_APP_RAM_start
+#define WOLFBOOT_LOAD_ADDRESS               0x10010000 /* &IMAGE_APP_RAM_start */
 
 #endif /* !H_TARGETS_TARGET_ */

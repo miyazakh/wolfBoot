@@ -67,7 +67,7 @@ void do_boot(const uint32_t *app_offset)
      app_entry = (void(*)(void))(*VECTOR_Reset_Handler);
      (*app_entry)();
 #elif defined(_RENESAS_RZN_)
-     app_entry = (void(*))(0x10010228);
+     app_entry = (void(*))(0x10010000);
      /* Jump to the application project */
      app_entry();
 #endif
