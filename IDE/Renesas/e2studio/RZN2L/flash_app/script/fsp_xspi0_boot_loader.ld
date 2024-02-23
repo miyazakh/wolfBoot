@@ -53,6 +53,8 @@ SECTIONS
     {
         _mtext = .;
         . = . + (_text_end - _text_start);
+        _mfvector = .;
+        . = . + (_fvector_end - _fvector_start);
         _mdata = .;
         . = . + (_data_end - _data_start);
         flash_contents_end = .;
@@ -61,10 +63,6 @@ SECTIONS
     {
     	*(.rodata*)
         _erodata = .;
-    } > xSPI0_CS0_SPACE
-    .cpu0_loader_table 0x60080000 : AT (0x60080000)
-    {
-        KEEP(*(CPU0_LOADER_TABLE))
     } > xSPI0_CS0_SPACE
     .text 0x00102000 : AT (_mtext)
     {
