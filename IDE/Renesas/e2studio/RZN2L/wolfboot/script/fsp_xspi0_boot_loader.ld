@@ -62,10 +62,6 @@ SECTIONS
     	*(.rodata*)
         _erodata = .;
     } > xSPI0_CS0_SPACE
-    .cpu0_loader_table 0x60080000 : AT (0x60080000)
-    {
-        KEEP(*(CPU0_LOADER_TABLE))
-    } > xSPI0_CS0_SPACE
     .text 0x00102000 : AT (_mtext)
     {
     	_text_start = .;

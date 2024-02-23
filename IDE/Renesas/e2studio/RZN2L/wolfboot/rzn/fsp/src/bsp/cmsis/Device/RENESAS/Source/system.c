@@ -218,12 +218,12 @@
 
 #elif defined(__GNUC__)
  #if BSP_CFG_C_RUNTIME_INIT
-  #define BSP_PRV_SECTION_LDR_DATA_ROM_ADDRESS                &_mdata
-  #define BSP_PRV_SECTION_LDR_DATA_RAM_START                  &_data_start
-  #define BSP_PRV_SECTION_LDR_DATA_RAM_END                    &_data_end
+  #define BSP_PRV_SECTION_LDR_DATA_ROM_ADDRESS                &_mloader_data
+  #define BSP_PRV_SECTION_LDR_DATA_RAM_START                  &__loader_data_start
+  #define BSP_PRV_SECTION_LDR_DATA_RAM_END                    &__loader_data_end
 
-  #define BSP_PRV_SECTION_LDR_DATA_BSS_START                  &__bss_start__
-  #define BSP_PRV_SECTION_LDR_DATA_BSS_END                    &__bss_end__
+  #define BSP_PRV_SECTION_LDR_DATA_BSS_START                  &__loader_bss_start
+  #define BSP_PRV_SECTION_LDR_DATA_BSS_END                    &__loader_bss_end
 
  #endif
 
@@ -761,7 +761,7 @@ void bsp_bss_init_4byte (uint32_t * src, uint32_t bytesize)
     __DSB();
 }
 
-#if !(BSP_CFG_RAM_EXECUTION) && !defined(EXTERNAL_LOADER)
+#if !(BSP_CFG_RAM_EXECUTION)
 
 /*******************************************************************************************************************//**
  * Copy the application program block from external Flash to internal RAM.

@@ -458,7 +458,7 @@ BSP_TARGET_ARM void mpu_cache_init (void)
 
     R_BSP_WarmStart(BSP_WARM_START_POST_CLOCK);
 
-#if BSP_CFG_C_RUNTIME_INIT
+#if BSP_CFG_C_RUNTIME_INIT && !defined(EXTERNAL_LOADER)
 
     /* Copy the loader data from external Flash to internal RAM. */
     bsp_loader_data_init();

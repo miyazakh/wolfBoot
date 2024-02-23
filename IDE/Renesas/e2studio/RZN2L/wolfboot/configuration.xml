@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<raConfiguration version="8">
+<raConfiguration version="9">
   <generalSettings>
     <option key="#Board#" value="board.rzn2lrsk.xspi0_x1"/>
     <option key="CPU" value="RZN2L"/>
@@ -401,10 +401,6 @@
       <description>RSK+RZN2L Board Support Files (xSPI0 x1 boot mode)</description>
       <originalPack>Renesas.RZN_board_rzn2l_rsk.1.3.0.pack</originalPack>
     </component>
-    <component apiversion="" class="HAL Drivers" condition="" group="all" subgroup="r_bsc_sdram" variant="" vendor="Renesas" version="1.3.0">
-      <description>SDRAM on Bus State Controller</description>
-      <originalPack>Renesas.RZN.1.3.0.pack</originalPack>
-    </component>
   </raComponentSelection>
   <raElcConfiguration/>
   <raIcuConfiguration/>
@@ -466,37 +462,9 @@
       <property id="module.driver.ioport.operation_single_output_port3" value="Low output"/>
       <property id="module.driver.ioport.edge_detect_single_output_port3" value="Rising edge"/>
     </module>
-    <module id="module.driver.sdram_on_bsc_sdram.416738920">
-      <property id="module.driver.sdram.name" value="g_sdram0"/>
-      <property id="module.driver.sdram.chip_select" value="module.driver.sdram.chip_select.chip_select_cs3"/>
-      <property id="module.driver.sdram.databus" value="module.driver.sdram.databus.databus_16bit"/>
-      <property id="module.driver.sdram.r_r_idle_cycle_same_cs" value="module.driver.sdram.r_r_idle_cycle_same_cs.cycle_4"/>
-      <property id="module.driver.sdram.r_r_idle_cycle_different_cs" value="module.driver.sdram.r_r_idle_cycle_different_cs.cycle_4"/>
-      <property id="module.driver.sdram.r_w_idle_cycle_same_cs" value="module.driver.sdram.r_w_idle_cycle_same_cs.cycle_4"/>
-      <property id="module.driver.sdram.r_w_idle_cycle_different_cs" value="module.driver.sdram.r_w_idle_cycle_different_cs.cycle_4"/>
-      <property id="module.driver.sdram.w_r_w_w_idle_cycle" value="module.driver.sdram.w_r_w_w_idle_cycle.cycle_4"/>
-      <property id="module.driver.sdram.row_address_bus" value="module.driver.sdram.row_address_bus.address_bus_11bit"/>
-      <property id="module.driver.sdram.column_address_bus" value="module.driver.sdram.column_address_bus.address_bus_8bit"/>
-      <property id="module.driver.sdram.trp" value="module.driver.sdram.trp.cycle_0"/>
-      <property id="module.driver.sdram.trcd" value="module.driver.sdram.trcd.cycle_0"/>
-      <property id="module.driver.sdram.tcl" value="module.driver.sdram.tcl.cycle_1"/>
-      <property id="module.driver.sdram.tdal_twr" value="module.driver.sdram.twr.cycle_0"/>
-      <property id="module.driver.sdram.trc" value="module.driver.sdram.trc.cycle_2"/>
-      <property id="module.driver.sdram.auto_refresh_period" value="64"/>
-      <property id="module.driver.sdram.auto_refresh_period_unit" value="module.driver.sdram.auto_refresh_period_unit.unit_period_msec"/>
-      <property id="module.driver.sdram.auto_refresh_continuous_number" value="module.driver.sdram.auto_refresh_continuous_number.1"/>
-      <property id="module.driver.sdram.mrs_burst_setting" value="module.driver.sdram.mrs_burst_setting.burst_read_burst_write"/>
-      <property id="module.driver.sdram.command_mode" value="module.driver.sdram.command_mode.command_mode_auto_precharge"/>
-      <property id="module.driver.sdram.p_callback" value="NULL"/>
-      <property id="module.driver.sdram.cmi_ipl" value="_disabled"/>
-    </module>
     <context id="_hal.0">
       <stack module="module.driver.ioport_on_ioport.0"/>
-      <stack module="module.driver.sdram_on_bsc_sdram.416738920"/>
     </context>
-    <config id="config.driver.bsc_sdram">
-      <property id="config.driver.bsc_sdram.param_checking_enable" value="config.driver.bsc_sdram.param_checking_enable.bsp"/>
-    </config>
     <config id="config.driver.ioport">
       <property id="config.driver.ioport.checking" value="config.driver.ioport.checking.system"/>
     </config>

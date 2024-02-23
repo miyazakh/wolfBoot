@@ -21,12 +21,11 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA
  */
-
-
-#include <wolfboot/wolfboot.h>
 #include "user_settings.h"
+#include "target.h"
+#include "wolfboot/wolfboot.h"
+#include "printf.h"
 
-#include <target.h>
 #include "hal_data.h"
 
 #define  BSC_SDRAM_SPACE    (0x30000000)
@@ -56,19 +55,31 @@ int ext_flash_erase(unsigned long address, int len);
 int ext_flash_write(unsigned long address, const uint8_t *data, int len);
 void ext_flash_lock(void);
 void ext_flash_unlock(void);
+uint32_t rz_memcopy(uint32_t *src, uint32_t *dst, uint32_t bytesize);
 
-int wolfBoot_dualboot_candidate(void)
+void* hal_get_primary_address(void);
+void* hal_get_update_address(void);
+
+static uint32_t rz_memset(uint32_t *dst, uint32_t val, uint32_t bytesize)
 {
-    return PART_BOOT;
+    uint32_t i;
+    uint32_t cnt;
+
+    /* copy count in 4 byte unit */
+    cnt = (bytesize + 3) >> 2;
+
+    for (i = 0; i < cnt; i++)
+    {
+        *dst++ = val;
+    }
+
+    /* ensuring data-changing */
+    __DSB();
+
+    return bytesize;
 }
 
-int wolfBoot_fallback_is_possible(void)
-{
-    return 0;
-
-}
-
-int rz_memcopy(uint32_t *src, uint32_t *dst, uint32_t bytesize)
+uint32_t rz_memcopy(uint32_t *src, uint32_t *dst, uint32_t bytesize)
 {
     uint32_t i;
     uint32_t cnt;
@@ -87,23 +98,49 @@ int rz_memcopy(uint32_t *src, uint32_t *dst, uint32_t bytesize)
     return bytesize;
 }
 
+static uint32_t rz_memwrite(uint32_t *dst, const uint8_t *data, uint32_t bytesize)
+{
+    uint32_t i;
+    uint32_t cnt;
+    uint32_t val = 0;
+    uint8_t  *p;
+    /* copy count in 4 byte unit */
+    cnt = (bytesize + 3) >> 2;
+
+    for (i = 0; i < cnt-1; i++)
+    {
+        *dst++ = *data++;
+    }
+
+    if (cnt%4) {
+        p = (uint8_t*)data;
+        for(i = 0; i < (cnt%4);i++) {
+            val |= *p;
+            val <<= 2;
+        }
+        val &= 0xFFFFFFFF;
+    }
+    /* ensuring data-changing */
+    __DSB();
+
+    return bytesize;
+}
+
 #ifdef EXT_FLASH
 
 int ext_flash_read(unsigned long address, uint8_t *data, int len)
 {
-    return rz_memcopy((void*)address, (uint32_t*)data, len);
+    return (int)rz_memcopy((void*)address, (uint32_t*)data, (uint32_t)len);
 }
 
 int ext_flash_erase(unsigned long address, int len)
 {
-    XMEMSET((void *)address, 0xFF, len);
-    return len;
+    return rz_memset((void *)address, 0xFFFFFFFF, (size_t)len);
 }
 
 int ext_flash_write(unsigned long address, const uint8_t *data, int len)
 {
-    XMEMCPY((void *)address, data, len);
-    return len;
+    return rz_memwrite((void *)address, data, (size_t)len);;
 }
 
 void ext_flash_lock(void)
@@ -126,12 +163,17 @@ void hal_prepare_boot(void)
 /* write data to sdram */
 int hal_flash_write(uint32_t addr, const uint8_t *data, int len)
 {
+    (void)addr;
+    (void)data;
+    (void)len;
     return 0;
 }
 
 /* write data to sdram */
 int hal_flash_erase(uint32_t address, int int_len)
 {
+    (void)address;
+    (void)int_len;
     return 0;
 }
 
@@ -145,11 +187,6 @@ void hal_flash_lock(void)
     return;
 }
 
-#if WOLFBOOT_DUALBANK
-void RAMFUNCTION hal_flash_dualbank_swap(void)
-{
-}
-#endif
 
 void* hal_get_primary_address(void)
 {
