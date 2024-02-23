@@ -94,6 +94,7 @@ Open project under IDE/Renesas/e2studio/RZN2L/wolfBoot with e2Studio, and build 
 + Select `No RTOS` from RTOS selection. Click Next.
 + Check `Bare Metal Minimal`. Click Finish.
 + Open Smart Configurator by clicking configuration.xml in the project
++ Go to `BSP` tab and increase LDR_SIZE_NML under `RSK+RZN2L(xSIP0x1 boot mode)` on Properties page, e.g. 0x00009000
 + Go to `BSP` tab and increase SVC Stack Size under `RZN2L stack size` on Properties page, e.g. 0x2000
 + Go to `BSP` tab and increase Heap Size under `RZN2L` on Properties page, e.g. 0x10000
 
@@ -101,6 +102,9 @@ Open project under IDE/Renesas/e2studio/RZN2L/wolfBoot with e2Studio, and build 
 + Copy <u>configuration.xml</u> and pincfg under `dummy_loader` to `wolfBoot`
 + Open Smart Configurator by clicking copied configuration.xml
 + Click `Generate Project Content` on Smart Configurator
++ Righ click on the projet and Open property of the project
++ Go to Cross ARM Lincer
++ Change Script files(-T) from `fsp_xspi0_boot.ld` to `fsp_xspi0_boot_loader.ld`
 + Add/Modify FSP generated code :
 + fsp/src/bsp/cmsis/Device/RENESAS/Source/startup.c
 
@@ -195,6 +199,9 @@ Open project under IDE/Renesas/e2studio/RZN2L/app_RZ with e2Studio, and build th
 + Copy <u>configuration.xml</u> and pincfg under `dummy_application` to `app_RZ`
 + Open Smart Configurator by clicking copied configuration.xml
 + Click `Generate Project Content` on Smart Configurator
++ Righ click on the projet and Open property of the project
++ Go to Cross ARM Lincer
++ Change Script files(-T) from `fsp_xspi0_boot.ld` to `fsp_xspi0_boot_app.ld`
 + Add/Modify FSP generated code :
 + fsp/src/bsp/cmsis/Device/RENESAS/Source/startup.c
 
@@ -297,7 +304,14 @@ To download the app V1 to external flash, you can use `flash_simple_loader` appl
 Open project under IDE/Renesas/e2studio/RZN2L/flash_app with e2Studio, and build the project.
 
 + Copy <u>configuration.xml</u> and pincfg under `dummy_application` to `flash_simple_loader`
++ Open Smart Configurator by clicking configuration.xml in the project
++ Open Interrupts tab
++ Select `INTCPU0` interrupts and remove it
 + Click `Generate Project Content` on Smart Configurator
++ Go to `BSP` tab and disable C Runtime Initialization under `RZN2L` on Properties page
++ Righ click on the projet and Open property of the project
++ Go to Cross ARM Lincer
++ Change Script files(-T) from `fsp_xspi0_boot.ld` to `fsp_xspi0_boot_loader.ld`
 + Build `flash_simple_loader` projet
 
 To run the application,
@@ -307,7 +321,7 @@ To run the application,
 + Select `J-Link ARM`. Click OK.
 + Select `R9A07G084M04`. Click OK.
 
-This simple application jsut downloads binaly files defiend in `Flash_section.s` and `Flash_updaet.s` through J-Link. `Flash_update.s` doesn't includes `the app v2` initially.
+This simple application jsut downloads binaly files defiend in `Flash_section.s` and `Flash_updaet.s` through J-Link Flash Downloader. `Flash_update.s` doesn't includes `the app v2` initially.
 
 Flash_update.s
 
