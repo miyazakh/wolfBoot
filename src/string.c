@@ -33,6 +33,9 @@
 size_t strlen(const char *s); /* forward declaration */
 #endif
 
+#define DEBUG_UART
+#define PRINTF_ENABLED
+
 #ifdef DEBUG_UART
     #include "printf.h"
     #ifdef PRINTF_ENABLED
@@ -293,7 +296,9 @@ void *memmove(void *dst, const void *src, size_t n)
 #endif /* __CCRX__ Renesas CCRX */
 #endif /* WOLFBOOT_USE_STDLIBC */
 
-#if defined(PRINTF_ENABLED) && defined(DEBUG_UART)
+void uart_write(const char* buf, uint32_t sz);
+#include <stdarg.h>
+//#if defined(PRINTF_ENABLED) && defined(DEBUG_UART)
 void uart_writenum(int num, int base)
 {
     int i = 0;
@@ -388,7 +393,8 @@ void uart_printf(const char* fmt, ...)
 {
     va_list argp;
     va_start(argp, fmt);
+    //uart_write(__FILE__, strlen(__FILE__));
     uart_vprintf(fmt, argp);
     va_end(argp);
 }
-#endif /* PRINTF_ENABLED && DEBUG_UART */
+//#endif /* PRINTF_ENABLED && DEBUG_UART */

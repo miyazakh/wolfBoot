@@ -36,6 +36,8 @@
 #include "uart_flash.h"
 #include "wolfboot/wolfboot.h"
 
+void uart_printf(const char* fmt, ...);
+
 #ifdef WOLFBOOT_TPM
 #include "tpm.h"
 #endif
@@ -98,8 +100,9 @@ int main(void)
     main_argv = argv;
     main_argc = argc;
 #endif
-
     hal_init();
+uart_printf("complete hal_init()\n");
+
     spi_flash_probe();
 #ifdef UART_FLASH
     uart_init(UART_FLASH_BITRATE, 8, 'N', 1);
@@ -111,8 +114,9 @@ int main(void)
 #ifdef WOLFCRYPT_SECURE_MODE
     wcs_Init();
 #endif
+uart_printf("start wolfBoot_start()\n");
     wolfBoot_start();
-
+uart_printf("end wolfBoot_start()\n");
 
     /* wolfBoot_start should never return. */
     wolfBoot_panic();

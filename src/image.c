@@ -39,7 +39,7 @@
 #ifdef WOLFBOOT_TPM
 #include "tpm.h"
 #endif
-
+extern void uart_printf(const char* fmt, ...);
 /* Globals */
 static uint8_t digest[WOLFBOOT_SHA_DIGEST_SIZE];
 
@@ -741,6 +741,7 @@ static int image_sha3_384(struct wolfBoot_image *img, uint8_t *hash)
     uint32_t position = 0;
     wc_Sha3 sha3_ctx;
 
+    uart_printf("Enter image_sha3_384\n");
     if (!img)
         return -1;
 
@@ -750,11 +751,15 @@ static int image_sha3_384(struct wolfBoot_image *img, uint8_t *hash)
         return -1;
     wc_InitSha3_384(&sha3_ctx, NULL, INVALID_DEVID);
     end_sha = stored_sha - (2 * sizeof(uint16_t)); /* Subtract 2 Type + 2 Len */
+
+    uart_printf("blksz %d position %d img->fm_size %d\n", WOLFBOOT_SHA_BLOCK_SIZE, position, img->fw_size);
     while (p < end_sha) {
         blksz = WOLFBOOT_SHA_BLOCK_SIZE;
         if (end_sha - p < blksz)
             blksz = end_sha - p;
+        //uart_printf("calling wc_Sha3_384_Update blksz %d\n", blksz);
         wc_Sha3_384_Update(&sha3_ctx, p, blksz);
+        //uart_printf("called wc_Sha3_384_Update \n");
         p += blksz;
     }
     do {
@@ -764,11 +769,16 @@ static int image_sha3_384(struct wolfBoot_image *img, uint8_t *hash)
         blksz = WOLFBOOT_SHA_BLOCK_SIZE;
         if (position + blksz > img->fw_size)
             blksz = img->fw_size - position;
+        /*if ((position%10000==0)
+            uart_printf("do {} calling wc_Sha3_384_Update blksz %d position %d img->fm_size %d\n", blksz, position, img->fw_size);*/
         wc_Sha3_384_Update(&sha3_ctx, p, blksz);
+        if ((position%10000)==0)
+            uart_printf(".");
         position += blksz;
     } while(position < img->fw_size);
 
     wc_Sha3_384_Final(&sha3_ctx, hash);
+    uart_printf("Leave image_sha3_384\n");
     return 0;
 }
 #ifndef WOLFBOOT_NO_SIGN
@@ -995,12 +1005,17 @@ int wolfBoot_open_image(struct wolfBoot_image *img, uint8_t part)
  */
 int wolfBoot_verify_integrity(struct wolfBoot_image *img)
 {
+    int16_t ret;
     uint8_t *stored_sha;
     uint16_t stored_sha_len;
     stored_sha_len = get_header(img, WOLFBOOT_SHA_HDR, &stored_sha);
+    uart_printf(" shar len  %d WOLFBOOT_SHA_DIGEST_SIZE %d\n", stored_sha_len, WOLFBOOT_SHA_DIGEST_SIZE);
     if (stored_sha_len != WOLFBOOT_SHA_DIGEST_SIZE)
         return -1;
-    if (image_hash(img, digest) != 0)
+    uart_printf("calling image_hash\n");
+    ret = image_hash(img, digest);
+    uart_printf("called image_hash %d\n", ret);
+    if (ret!= 0)
         return -1;
     if (memcmp(digest, stored_sha, stored_sha_len) != 0)
         return -1;
