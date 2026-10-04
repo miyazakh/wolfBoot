@@ -36,6 +36,8 @@
 #include "hal/zynq.h"
 #elif defined(TARGET_nxp_ls1028a)
 #include "hal/nxp_ls1028a.h"
+#elif defined(TARGET_nxp_imx8)
+#include "hal/nxp_imx8.h"
 #endif
 
 /* Linker exported variables */

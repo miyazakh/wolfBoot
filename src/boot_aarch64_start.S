@@ -50,6 +50,10 @@
 #include "hal/imx8qm.h"
 #endif
 
+#ifdef TARGET_nxp_imx8
+#include "hal/nxp_imx8.h"
+#endif
+
 /* GICv2 Register Offsets */
 #ifndef GICD_BASE
 #define GICD_BASE       0xF9010000
