@@ -158,6 +158,48 @@ static void nxp_imx8_icache_enable(void)
 }
 #endif
 
+#if defined(NXP_IMX8_BL33) && defined(DEBUG) && defined(DEBUG_UART)
+/* Image bounds from hal/nxp_imx8.ld, used to say whether the faulting PC is
+ * inside wolfBoot itself. */
+extern uint8_t _start_text[];
+extern uint8_t _end[];
+
+/* From simple_el2_fault_common (src/boot_aarch64_start.S), installed as
+ * VBAR_EL2 in BL33 mode; the vector halts in wfi after this. Slots 0-7 are
+ * current EL (wolfBoot), 8-15 lower EL. When started from U-Boot proper,
+ * U-Boot's own exception vectors stay in place instead. */
+void simple_el2_fault_handler(unsigned long esr, unsigned long elr,
+    unsigned long far, unsigned long vector);
+void simple_el2_fault_handler(unsigned long esr, unsigned long elr,
+    unsigned long far, unsigned long vector)
+{
+    const char* from;
+    uintptr_t pc;
+
+    from = (vector >= 8) ? "lower EL (payload)" : "current EL (wolfBoot)";
+    pc = (uintptr_t)elr;
+
+    wolfBoot_printf("\n*** i.MX8MM EL2 EXCEPTION ***\n");
+    wolfBoot_printf("vector=%d from %s\n", (int)vector, from);
+    wolfBoot_printf("ESR=0x%08x EC=0x%02x ISS=0x%06x\n",
+        (uint32_t)esr, (uint32_t)((esr >> 26) & 0x3F),
+        (uint32_t)(esr & 0x1FFFFFUL));
+    wolfBoot_printf("ELR=0x%08x%08x\n",
+        (uint32_t)(elr >> 32), (uint32_t)(elr & 0xFFFFFFFFUL));
+    wolfBoot_printf("FAR=0x%08x%08x\n",
+        (uint32_t)(far >> 32), (uint32_t)(far & 0xFFFFFFFFUL));
+    if (pc >= (uintptr_t)_start_text && pc < (uintptr_t)_end) {
+        wolfBoot_printf("ELR is inside wolfBoot (+0x%x from 0x%08x)\n",
+            (uint32_t)(pc - (uintptr_t)_start_text),
+            (uint32_t)(uintptr_t)_start_text);
+    }
+    else {
+        wolfBoot_printf("ELR is outside wolfBoot [0x%08x-0x%08x)\n",
+            (uint32_t)(uintptr_t)_start_text, (uint32_t)(uintptr_t)_end);
+    }
+}
+#endif /* NXP_IMX8_BL33 && DEBUG && DEBUG_UART */
+
 void hal_init(void)
 {
 #ifdef NXP_IMX8_BL33

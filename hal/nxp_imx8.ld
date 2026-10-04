@@ -49,10 +49,21 @@ SECTIONS
         __bss_end__ = .;
         _end = .;
     } > DDR_MEM
+
+    /* Reserved stack, used only in BL33 mode (NXP_IMX8_BL33: sp = END_STACK,
+     * see src/boot_aarch64_start.S). When started from U-Boot proper the
+     * simple startup keeps sp at the image base (_vector_table) as before.
+     * NOLOAD, after _end, so the U-Boot "go" build is unchanged. */
+    .stack (NOLOAD) :
+    {
+        . = ALIGN(16);
+        . += 0x40000;      /* 256 KB */
+        . = ALIGN(16);
+        END_STACK = .;
+    } > DDR_MEM
     . = ALIGN(4);
 }
 
-END_STACK = _start_text;
 kernel_addr  = 0x40540000;
 update_addr  = 0x46000000;
 dts_addr     = 0x43000000;
