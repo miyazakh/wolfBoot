@@ -24,6 +24,13 @@
 #include <target.h>
 #include "image.h"
 #include "printf.h"
+#if defined(DISK_SDCARD) || defined(DISK_EMMC)
+#include "hal.h"
+#include "hal/nxp_imx8.h"
+#include "sdhci.h"
+#include "disk.h"
+#include "aarch64_arch.h"
+#endif
 #ifndef ARCH_AARCH64
 #   error "wolfBoot nxp-imx8 HAL: wrong architecture selected. Please compile with ARCH=AARCH64."
 #endif
@@ -200,6 +207,502 @@ void simple_el2_fault_handler(unsigned long esr, unsigned long elr,
 }
 #endif /* NXP_IMX8_BL33 && DEBUG && DEBUG_UART */
 
+
+#if defined(DISK_SDCARD) || defined(DISK_EMMC)
+/* ==========================================================================
+ * eMMC (uSDHC3) for src/sdhci.c
+ * Enabled with DISK_EMMC=1 (BL33 mode only, see config/examples/nxp-imx8.config).
+ * ========================================================================== */
+#ifdef DISK_SDCARD
+#error "nxp_imx8: only DISK_EMMC (uSDHC3) is supported"
+#endif
+
+#define NXP_IMX8_USDHC_BASE     NXP_IMX8_USDHC3_BASE
+
+static inline uint32_t rd32(uintptr_t a) { return *(volatile uint32_t*)a; }
+static inline void wr32(uintptr_t a, uint32_t v) { *(volatile uint32_t*)a = v; }
+
+uint64_t hal_get_timer_us(void)
+{
+    return (timer_get_count() * 1000000ULL) / timer_get_freq();
+}
+
+void hal_delay_us(uint32_t us)
+{
+    uint64_t deadline = timer_deadline_us(us);
+    while (!timer_expired(deadline))
+        ;
+}
+
+/* uSDHC3 pins (PICO-IMX8MM eMMC), mux mode 2. Same as U-Boot's
+ * board_mmc_init() (board/technexion/pico-imx8mm/pico-imx8mm_spl.c). */
+static const struct {
+    uint16_t mux;   /* IOMUXC SW_MUX_CTL_PAD offset */
+    uint16_t pad;   /* IOMUXC SW_PAD_CTL_PAD offset */
+    uint32_t mode;
+} usdhc3_pads[] = {
+    { 0x138, 0x3A0, 2 | IOMUXC_MUX_SION },  /* NAND_WE_B   -> USDHC3_CLK   */
+    { 0x13C, 0x3A4, 2 },                    /* NAND_WP_B   -> USDHC3_CMD   */
+    { 0x11C, 0x384, 2 },                    /* NAND_DATA04 -> USDHC3_DATA0 */
+    { 0x120, 0x388, 2 },                    /* NAND_DATA05 -> USDHC3_DATA1 */
+    { 0x124, 0x38C, 2 },                    /* NAND_DATA06 -> USDHC3_DATA2 */
+    { 0x128, 0x390, 2 },                    /* NAND_DATA07 -> USDHC3_DATA3 */
+    { 0x130, 0x398, 2 },                    /* NAND_RE_B   -> USDHC3_DATA4 */
+    { 0x100, 0x368, 2 },                    /* NAND_CE2_B  -> USDHC3_DATA5 */
+    { 0x104, 0x36C, 2 },                    /* NAND_CE3_B  -> USDHC3_DATA6 */
+    { 0x108, 0x370, 2 },                    /* NAND_CLE    -> USDHC3_DATA7 */
+};
+
+/* SPL only sets up uSDHC3 when it boots from eMMC (not when loaded over USB
+ * by uuu), so do it here: clock root = SYS_PLL1_400M, gate on, pins. */
+static void nxp_imx8_usdhc3_setup(void)
+{
+    unsigned int i;
+
+    wr32(CCM_CCGR_CLR(CCM_CCGR_USDHC3), CCM_CCGR_CLK_ON);
+    wr32(CCM_TARGET_ROOT(CCM_ROOT_USDHC3),
+        CCM_TARGET_ROOT_ENABLE | CCM_TARGET_ROOT_MUX(1));
+    wr32(CCM_CCGR_SET(CCM_CCGR_USDHC3), CCM_CCGR_CLK_ON);
+
+    for (i = 0; i < sizeof(usdhc3_pads) / sizeof(usdhc3_pads[0]); i++) {
+        wr32(NXP_IMX8_IOMUXC_BASE + usdhc3_pads[i].mux, usdhc3_pads[i].mode);
+        wr32(NXP_IMX8_IOMUXC_BASE + usdhc3_pads[i].pad, IOMUXC_PAD_USDHC);
+    }
+}
+
+/* uSDHC -> SDHCI shim (src/sdhci.c uses only sdhci_reg_read/write): transfer
+ * mode in MIX_CTRL, width in PROT_CTRL, DVS/SDCLKFS divider, no error summary,
+ * DMA err 25->28. Same uSDHC IP as i.MX8QM; taken from hal/imx8qm.c. */
+
+/* Not exported by include/sdhci.h; every in-tree SDHCI platform defines it
+ * locally (hal/versal.c, hal/zynq7000.c, hal/cm4.h). */
+#ifndef CADENCE_SRS_OFFSET
+#define CADENCE_SRS_OFFSET  0x200
+#endif
+
+#ifndef USDHC_RESET_TIMEOUT_US
+#define USDHC_RESET_TIMEOUT_US   1000000
+#endif
+#ifndef USDHC_INIT_TIMEOUT_US
+#define USDHC_INIT_TIMEOUT_US     100000
+#endif
+#ifndef USDHC_CLK_STABLE_TIMEOUT_US
+#define USDHC_CLK_STABLE_TIMEOUT_US 100000
+#endif
+
+/* Standard-SDHCI offsets, as seen after the Cadence SRS base is removed. */
+#define STD_BLK             0x04
+#define STD_CMD             0x0C
+#define STD_PRES_STATE      0x24
+#define STD_HOST_CTRL1      0x28
+#define STD_CLOCK_CTRL      0x2C
+#define STD_INT_STATUS      0x30
+#define STD_INT_STATUS_EN   0x34
+#define STD_INT_SIGNAL_EN   0x38
+#define STD_HOST_CTRL2      0x3C
+#define STD_CAPS1           0x40
+#define STD_CAPS2           0x44
+#define STD_MAX_CURRENT     0x48
+#define STD_ADMA_ADDR_LO    0x58
+#define STD_ADMA_ADDR_HI    0x5C
+
+/* uSDHC-only error bits with no standard-SDHCI position. */
+#define USDHC_INT_DMAE      (1U << 28)
+#define USDHC_INT_TNE       (1U << 26)
+
+/* Fields the driver reads back that uSDHC does not implement. */
+static uint32_t srs10_shadow;   /* bus power / bus voltage / high speed */
+static uint32_t srs15_shadow;   /* host control 2 */
+/* The rate sdhci_platform_set_clock() achieved, reported as the base so the
+ * generic driver's divider is 1. NOT the CAPS1 base field, which stays the
+ * source rate. */
+static uint32_t usdhc_achieved_clk_khz = NXP_IMX8_USDHC_PERCLK_HZ / 1000;
+
+uint32_t sdhci_reg_read(uint32_t offset)
+{
+    uintptr_t b = NXP_IMX8_USDHC_BASE;
+    uint32_t std, v, raw;
+
+    if (offset < CADENCE_SRS_OFFSET) {
+        /* Cadence HRS range: uSDHC has no equivalent. Report the PHY
+         * handshake as acknowledged so the driver's wait loops still exit. */
+        return (offset == SDHCI_HRS04) ? SDHCI_HRS04_UIS_ACK : 0;
+    }
+    std = offset - CADENCE_SRS_OFFSET;
+
+    switch (std) {
+        case STD_PRES_STATE:
+            v = rd32(b + USDHC_PRES_STATE);
+            /* Card state stable has no uSDHC bit; the card-inserted bit is
+             * already debounced, so report it as always stable. */
+            v |= SDHCI_SRS09_CSS;
+            /* DAT0 level moves from the DLSL field (bit 24) to bit 20. */
+            if ((v & USDHC_PRES_DLSL_DAT0) != 0)
+                v |= SDHCI_SRS09_DAT0_LVL;
+            else
+                v &= ~SDHCI_SRS09_DAT0_LVL;
+            return v;
+
+        case STD_HOST_CTRL1:
+            v = srs10_shadow & ~(uint32_t)(SDHCI_SRS10_DTW | SDHCI_SRS10_EDTW);
+            switch (rd32(b + USDHC_PROT_CTRL) & USDHC_PROT_DTW_MASK) {
+                case USDHC_PROT_DTW_4BIT: v |= SDHCI_SRS10_DTW;  break;
+                case USDHC_PROT_DTW_8BIT: v |= SDHCI_SRS10_EDTW; break;
+                default: break;
+            }
+            return v;
+
+        case STD_CLOCK_CTRL:
+            /* No internal clock-enable or stable bit; report both satisfied. */
+            v = rd32(b + USDHC_SYS_CTRL) &
+                (uint32_t)(USDHC_SYS_DTOCV_MASK | USDHC_SYS_RSTA |
+                           USDHC_SYS_RSTC | USDHC_SYS_RSTD);
+            return v | SDHCI_SRS11_ICE | SDHCI_SRS11_ICS | SDHCI_SRS11_SDCE;
+
+        case STD_INT_STATUS:
+        case STD_INT_STATUS_EN:
+        case STD_INT_SIGNAL_EN:
+            raw = rd32(b + std);
+            v = raw;
+            if ((raw & USDHC_INT_DMAE) != 0)
+                v |= SDHCI_SRS12_EADMA;
+            /* Hide uSDHC-only bits and synthesize the summary the driver
+             * polls. TNE has no standard bit, so test the raw value:
+             * otherwise a latched tuning error stalls the transfer. */
+            v &= ~(uint32_t)(USDHC_INT_DMAE | USDHC_INT_TNE);
+            if (std == STD_INT_STATUS &&
+                    (((v & SDHCI_SRS12_ERR_STAT) != 0) ||
+                     ((raw & USDHC_INT_TNE) != 0))) {
+                v |= SDHCI_SRS12_EINT;
+            }
+            return v;
+
+        case STD_HOST_CTRL2:
+            return srs15_shadow;
+
+        case STD_CAPS1:
+            /* uSDHC zeroes these; synthesize a 50 MHz timeout clock and the
+             * real peripheral clock. 64-bit addressing masked off. */
+            v = rd32(b + USDHC_HOST_CTRL_CAP) &
+                (uint32_t)(USDHC_CAP_VS33 | USDHC_CAP_VS30 | USDHC_CAP_VS18);
+            v |= (50U << SDHCI_SRS16_TCF_SHIFT) & SDHCI_SRS16_TCF_MASK;
+            v |= SDHCI_SRS16_TCU; /* timeout clock is in MHz */
+            /* Constant source clock in MHz; the achieved rate would truncate
+             * to 0 MHz once the 400 kHz identification clock is programmed. */
+            v |= ((NXP_IMX8_USDHC_PERCLK_HZ / 1000000U)
+                    << SDHCI_SRS16_BCSDCLK_SHIFT) &
+                 SDHCI_SRS16_BCSDCLK_MASK;
+            return v;
+
+        case STD_CAPS2:
+            return 0;
+
+        case STD_ADMA_ADDR_LO:
+            /* SDMA, not ADMA2: PROT_CTRL selects DMASEL=simple, so SRS22 is
+             * uSDHC's DS_ADDR (the running address the boundary handler
+             * rewrites to resume), not ADMA_SYS_ADDR. */
+            return rd32(b + USDHC_DS_ADDR);
+
+        case STD_ADMA_ADDR_HI:
+            return 0; /* 32-bit ADMA only */
+
+        case STD_MAX_CURRENT:
+            /* uSDHC has no max-current register, and this offset is its live
+             * MIX_CTRL. Report no capability, which leaves XPC off. */
+            return 0;
+
+        default:
+            return rd32(b + std);
+    }
+}
+
+void sdhci_reg_write(uint32_t offset, uint32_t val)
+{
+    uintptr_t b = NXP_IMX8_USDHC_BASE;
+    uint32_t std, v, mix;
+
+    if (offset < CADENCE_SRS_OFFSET) {
+        /* The only Cadence host register the driver writes is the software
+         * reset; route it to the uSDHC reset-all bit. */
+        if (offset == SDHCI_HRS00 && (val & SDHCI_HRS00_SWR) != 0)
+            wr32(b + USDHC_SYS_CTRL,
+                rd32(b + USDHC_SYS_CTRL) | USDHC_SYS_RSTA);
+        return;
+    }
+    std = offset - CADENCE_SRS_OFFSET;
+
+    switch (std) {
+        case STD_BLK:
+            /* Bit 12 is block size here, SDMA boundary in standard SDHCI. */
+            wr32(b + USDHC_BLK_ATT,
+                (val & 0xFFFF0000U) | (val & 0x0FFFU));
+            return;
+
+        case STD_CMD:
+            /* MIX_CTRL first: writing CMD_XFR_TYP starts the command. Bits
+             * above 5 of MIX_CTRL have no standard equivalent; preserve. */
+            mix = rd32(b + USDHC_MIX_CTRL) & ~(uint32_t)USDHC_MIX_CTRL_XFER_MASK;
+            mix |= val & USDHC_MIX_CTRL_XFER_MASK;
+            wr32(b + USDHC_MIX_CTRL, mix);
+
+            v = val & 0xFFFF0000U;
+            /* The Cadence response-check bits alias to "48-bit with busy". SD
+             * data commands are R1, not R1b, so a busy check would wait on
+             * DAT0 forever; downgrade. */
+            if ((v & USDHC_XFR_DPSEL) != 0 &&
+                    (v & USDHC_XFR_RSPTYP_MASK) == USDHC_XFR_RSPTYP_48B) {
+                v = (v & ~(uint32_t)USDHC_XFR_RSPTYP_MASK) |
+                    USDHC_XFR_RSPTYP_48;
+            }
+            wr32(b + USDHC_CMD_XFR_TYP, v);
+            return;
+
+        case STD_HOST_CTRL1:
+            srs10_shadow = val;
+            v = rd32(b + USDHC_PROT_CTRL) &
+                ~(uint32_t)(USDHC_PROT_DTW_MASK | USDHC_PROT_DMASEL_MASK);
+            if ((val & SDHCI_SRS10_EDTW) != 0)
+                v |= USDHC_PROT_DTW_8BIT;
+            else if ((val & SDHCI_SRS10_DTW) != 0)
+                v |= USDHC_PROT_DTW_4BIT;
+            else
+                v |= USDHC_PROT_DTW_1BIT;
+            /* Standard SDHCI selects the DMA engine in bits 3:4; uSDHC uses
+             * bits 8:9. Only simple (SDMA) is ever requested here. */
+            v |= USDHC_PROT_DMASEL_SIMPLE;
+            wr32(b + USDHC_PROT_CTRL, v);
+            return;
+
+        case STD_CLOCK_CTRL:
+            /* Only the shared fields; the divider is owned by
+             * sdhci_platform_set_clock, so drop the standard divisor bits. */
+            v = rd32(b + USDHC_SYS_CTRL) & ~(uint32_t)USDHC_SYS_DTOCV_MASK;
+            v |= val & USDHC_SYS_DTOCV_MASK;
+            v |= val & (uint32_t)(USDHC_SYS_RSTA | USDHC_SYS_RSTC |
+                                  USDHC_SYS_RSTD);
+            wr32(b + USDHC_SYS_CTRL, v);
+            return;
+
+        case STD_INT_STATUS:
+            /* Write-1-to-clear. Map the standard ADMA error bit onto the uSDHC
+             * one and clear TNE with any error or the summary: the driver
+             * never sees TNE, so this is its only exit. */
+            v = val;
+            if ((val & SDHCI_SRS12_EADMA) != 0)
+                v |= USDHC_INT_DMAE;
+            if ((val & (SDHCI_SRS12_ERR_STAT | SDHCI_SRS12_EINT)) != 0)
+                v |= USDHC_INT_TNE;
+            wr32(b + USDHC_INT_STATUS, v & ~(uint32_t)SDHCI_SRS12_EINT);
+            return;
+
+        case STD_INT_STATUS_EN:
+        case STD_INT_SIGNAL_EN:
+            /* On uSDHC a status bit does not latch unless its enable is set,
+             * so the uSDHC-only error enables must be added to the mask the
+             * generic driver builds. */
+            v = val & ~(uint32_t)SDHCI_SRS12_EINT;
+            if ((val & SDHCI_SRS12_ERR_STAT) != 0)
+                v |= USDHC_INT_DMAE | USDHC_INT_TNE;
+            wr32(b + std, v);
+            return;
+
+        case STD_HOST_CTRL2:
+            srs15_shadow = val;
+            /* 1.8V signaling lives in VEND_SPEC on uSDHC. */
+            v = rd32(b + USDHC_VEND_SPEC);
+            if ((val & SDHCI_SRS15_V18SE) != 0)
+                v |= USDHC_VEND_SPEC_VSELECT;
+            else
+                v &= ~(uint32_t)USDHC_VEND_SPEC_VSELECT;
+            wr32(b + USDHC_VEND_SPEC, v);
+            return;
+
+        case STD_CAPS1:
+        case STD_CAPS2:
+            return; /* read-only */
+
+        case STD_ADMA_ADDR_LO:
+            wr32(b + USDHC_DS_ADDR, val);   /* see the read side */
+            return;
+
+        case STD_ADMA_ADDR_HI:
+            return; /* 32-bit ADMA only */
+
+        default:
+            wr32(b + std, val);
+            return;
+    }
+}
+
+void sdhci_platform_init(void)
+{
+    uintptr_t b = NXP_IMX8_USDHC_BASE;
+    uint64_t deadline;
+    uint32_t v;
+
+    nxp_imx8_usdhc3_setup();
+
+    /* Reset the controller, then apply the settings that survive it. */
+    wr32(b + USDHC_SYS_CTRL, rd32(b + USDHC_SYS_CTRL) | USDHC_SYS_RSTA);
+    deadline = timer_deadline_us(USDHC_RESET_TIMEOUT_US);
+    while ((rd32(b + USDHC_SYS_CTRL) & USDHC_SYS_RSTA) != 0) {
+        if (timer_expired(deadline)) {
+            wolfBoot_printf("imx8mm usdhc: reset-all did not clear\n");
+            break;
+        }
+    }
+
+    /* Little-endian data port, card-detect from DAT3 disabled (eMMC). */
+    v = rd32(b + USDHC_PROT_CTRL);
+    v = (v & ~(uint32_t)USDHC_PROT_EMODE_MASK) | USDHC_PROT_EMODE_LE;
+    v &= ~(uint32_t)USDHC_PROT_D3CD;
+    wr32(b + USDHC_PROT_CTRL, v);
+
+    /* Move a whole 512-byte block per watermark event, so the PIO loop sees
+     * one Buffer Read Ready per block rather than one every 32 bytes. */
+    wr32(b + USDHC_WTMK_LVL,
+        ((uint32_t)USDHC_WTMK_BLOCK_WORDS << USDHC_WTMK_RD_SHIFT) |
+        ((uint32_t)USDHC_WTMK_BLOCK_WORDS << USDHC_WTMK_WR_SHIFT));
+
+    /* Send the 80 initialization clocks the card needs before CMD0. */
+    wr32(b + USDHC_SYS_CTRL, rd32(b + USDHC_SYS_CTRL) | USDHC_SYS_INITA);
+    deadline = timer_deadline_us(USDHC_INIT_TIMEOUT_US);
+    while ((rd32(b + USDHC_SYS_CTRL) & USDHC_SYS_INITA) != 0) {
+        if (timer_expired(deadline))
+            break;
+    }
+}
+
+/* uSDHC divides by (SDCLKFS prescaler) * (DVS + 1). Reporting the requested
+ * rate back as the base clock makes the generic driver's divider settle on 1. */
+uint32_t sdhci_platform_set_clock(uint32_t clock_khz, uint32_t base_clk_khz)
+{
+    uintptr_t b = NXP_IMX8_USDHC_BASE;
+    uint32_t target_hz, pre, dvs, v;
+    uint64_t deadline;
+
+    (void)base_clk_khz;
+
+    if (clock_khz == 0)
+        return 0;
+
+#ifdef NXP_IMX8_USDHC_MAX_CLK_KHZ
+    if (clock_khz > NXP_IMX8_USDHC_MAX_CLK_KHZ)
+        clock_khz = NXP_IMX8_USDHC_MAX_CLK_KHZ;
+#endif
+
+    target_hz = clock_khz * 1000U;
+
+    /* Smallest prescaler/divisor pair not exceeding the requested rate; the
+     * prescaler is a power of two from 1 to 256 and the divisor runs 1..16. */
+    for (pre = 1; pre <= 256; pre <<= 1) {
+        for (dvs = 1; dvs <= 16; dvs++) {
+            if ((NXP_IMX8_USDHC_PERCLK_HZ / (pre * dvs)) <= target_hz)
+                goto found;
+        }
+    }
+    pre = 256;
+    dvs = 16;
+found:
+    v = rd32(b + USDHC_SYS_CTRL) &
+        ~(uint32_t)(USDHC_SYS_DVS_MASK | USDHC_SYS_SDCLKFS_MASK);
+    /* SDCLKFS is a one-hot prescaler code: 0x01 = divide by 2, and each
+     * further bit doubles it. A prescaler of 1 is encoded as 0. */
+    v |= ((pre >> 1) << USDHC_SYS_SDCLKFS_SHIFT) & USDHC_SYS_SDCLKFS_MASK;
+    v |= ((dvs - 1) << USDHC_SYS_DVS_SHIFT) & USDHC_SYS_DVS_MASK;
+    wr32(b + USDHC_SYS_CTRL, v);
+
+    /* Wait for the divided clock to settle before any command is issued. */
+    deadline = timer_deadline_us(USDHC_CLK_STABLE_TIMEOUT_US);
+    while ((rd32(b + USDHC_PRES_STATE) & USDHC_PRES_SDSTB) == 0) {
+        if (timer_expired(deadline)) {
+            wolfBoot_printf("imx8mm usdhc: SD clock never stabilized\n");
+            return 0;
+        }
+    }
+
+    usdhc_achieved_clk_khz = (NXP_IMX8_USDHC_PERCLK_HZ / (pre * dvs)) / 1000U;
+    return usdhc_achieved_clk_khz;
+}
+
+void sdhci_platform_irq_init(void)
+{
+    /* Polled mode: no GIC wiring needed for the boot path. */
+}
+
+void sdhci_platform_set_bus_mode(int is_emmc)
+{
+    /* The bus width is driven through Host Control 1, which the shim
+     * translates; there is no separate eMMC/SD mode select on uSDHC. */
+    (void)is_emmc;
+}
+
+#ifdef NXP_IMX8_EMMC_PROBE
+static uint32_t le32(const uint8_t *p)
+{
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+/* Phase 2 bring-up: initialize the eMMC, read the MBR and print the partition
+ * table and the filesystem type of partition 1. */
+static void nxp_imx8_emmc_probe(void)
+{
+    static uint8_t sec[512] XALIGNED(4);
+    uint64_t t0, t1;
+    uint32_t lba1 = 0;
+    char name[9];
+    int i, ret;
+
+    t0 = hal_get_timer_us();
+    ret = disk_init(0);
+    t1 = hal_get_timer_us();
+    wolfBoot_printf("eMMC: init %s (%d), %d ms\n", (ret == 0) ? "OK" : "FAILED",
+        ret, (int)((t1 - t0) / 1000));
+    if (ret != 0)
+        return;
+
+    if (disk_read(0, 0, sizeof(sec), sec) < 0) {
+        wolfBoot_printf("eMMC: MBR read failed\n");
+        return;
+    }
+    if (sec[510] != 0x55 || sec[511] != 0xAA) {
+        wolfBoot_printf("eMMC: no MBR signature (0x%x 0x%x)\n",
+            sec[510], sec[511]);
+        return;
+    }
+    wolfBoot_printf("eMMC: MBR partitions\n");
+    for (i = 0; i < 4; i++) {
+        const uint8_t *e = sec + 446 + (16 * i);
+        uint32_t start = le32(e + 8);
+        uint32_t num = le32(e + 12);
+        if (e[4] == 0)
+            continue;
+        if (i == 0)
+            lba1 = start;
+        wolfBoot_printf("  %d: type 0x%x start %u size %u sectors (%u MB)\n",
+            i + 1, e[4], start, num, num / 2048);
+    }
+
+    if (lba1 != 0 &&
+            disk_read(0, (uint64_t)lba1 * 512, sizeof(sec), sec) == 0) {
+        wolfBoot_printf("eMMC: partition 1 boot sector: sig 0x%x%x",
+            sec[510], sec[511]);
+        memcpy(name, sec + 0x03, 8);    /* BS_OEMName */
+        name[8] = '\0';
+        wolfBoot_printf(", OEM \"%s\"", name);
+        memcpy(name, sec + 0x36, 8);    /* FAT12/FAT16 BS_FilSysType */
+        if (memcmp(name, "FAT", 3) != 0)
+            memcpy(name, sec + 0x52, 8);/* FAT32 BS_FilSysType */
+        if (memcmp(name, "FAT", 3) != 0)
+            memcpy(name, "unknown ", 8);
+        wolfBoot_printf(", type \"%s\"\n", name);
+    }
+}
+#endif /* NXP_IMX8_EMMC_PROBE */
+
+#endif /* DISK_SDCARD || DISK_EMMC */
+
 void hal_init(void)
 {
 #ifdef NXP_IMX8_BL33
@@ -207,6 +710,9 @@ void hal_init(void)
 #endif
 #ifdef DEBUG_UART
     uart_init();
+#endif
+#if defined(DISK_EMMC) && defined(NXP_IMX8_EMMC_PROBE)
+    nxp_imx8_emmc_probe();
 #endif
     #if defined(TEST_ENCRYPT) && defined (EXT_ENCRYPTED)
     char enc_key[] = "0123456789abcdef0123456789abcdef"
@@ -216,12 +722,16 @@ void hal_init(void)
 }
 
 /* MMU/cache teardown for the Linux arm64 boot protocol is done by do_boot()
- * via el2_flush_and_disable_mmu() (EL2_HYPERVISOR=1 from hal/nxp_imx8.h).
- * It runs after do_boot()'s last wolfBoot_printf(), so U-Boot printf is
- * never called with the MMU off. Nothing to do here.
+ * via el2_flush_and_disable_mmu() (EL2_HYPERVISOR=1 from hal/nxp_imx8.h),
+ * after do_boot()'s last wolfBoot_printf(). Only peripherals used by
+ * wolfBoot are put back into their reset state here.
  */
 void hal_prepare_boot(void)
 {
+#if defined(DISK_SDCARD) || defined(DISK_EMMC)
+    /* Hand a reset controller to the Linux driver (as for imx8qm). */
+    sdhci_shutdown();
+#endif
 }
 
 
