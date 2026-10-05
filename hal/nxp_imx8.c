@@ -768,6 +768,12 @@ static void nxp_imx8_emmc_probe(void)
         ret, (int)((t1 - t0) / 1000));
     if (ret != 0)
         return;
+    switch (rd32(NXP_IMX8_USDHC_BASE + USDHC_PROT_CTRL) & USDHC_PROT_DTW_MASK) {
+        case USDHC_PROT_DTW_8BIT: i = 8; break;
+        case USDHC_PROT_DTW_4BIT: i = 4; break;
+        default:                  i = 1; break;
+    }
+    wolfBoot_printf("eMMC: %d-bit, %u kHz\n", i, usdhc_achieved_clk_khz);
 
     if (disk_read(0, 0, sizeof(sec), sec) < 0) {
         wolfBoot_printf("eMMC: MBR read failed\n");
