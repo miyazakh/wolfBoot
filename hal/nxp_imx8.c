@@ -163,7 +163,114 @@ static void nxp_imx8_icache_enable(void)
                          "isb\n" :: "r"(sctlr) : "memory");
     }
 }
-#endif
+
+#ifdef NXP_IMX8_MMU
+/* Identity MMU (NXP_IMX8_MMU): with the MMU off all memory is Device-nGnRnE,
+ * so hashing the 27 MB FIT and copying the kernel out of it each take tens of
+ * seconds. Map DRAM Normal cacheable and the rest Device (1 GB blocks, low
+ * 4 GB). do_boot() -> el2_flush_and_disable_mmu() cleans the caches to PoC
+ * and turns the MMU off again before jumping to Linux. As hal/imx8qm.c. */
+
+/* Normal = AttrIdx0 + AF + inner-shareable; Device = AttrIdx1 + AF + XN, since
+ * an instruction fetch from Device memory is CONSTRAINED UNPREDICTABLE. */
+#define MMU_BLOCK_NORMAL  0x0000000000000701ULL
+#define MMU_BLOCK_DEVICE  (0x0000000000000405ULL | (1ULL << 54) | (1ULL << 53))
+
+static volatile uint64_t nxp_imx8_l1_table[512] __attribute__((aligned(4096)));
+
+static void nxp_imx8_mmu_enable(void)
+{
+    uint64_t sctlr, el;
+    int i;
+
+    __asm__ volatile("mrs %0, CurrentEL" : "=r"(el));
+    __asm__ volatile("mrs %0, sctlr_el2" : "=r"(sctlr));
+    /* EL2 registers below; ATF enters BL33 at EL2 with the MMU off. */
+    if (((el >> 2) & 0x3) != 2 || (sctlr & (1UL << 0)) != 0) {
+        nxp_imx8_icache_enable();
+        return;
+    }
+
+    for (i = 0; i < 4; i++) {
+        uint64_t base = (uint64_t)i << 30;
+        nxp_imx8_l1_table[i] = base |
+            ((base >= NXP_IMX8_DRAM_BASE && base < NXP_IMX8_DRAM_END) ?
+                MMU_BLOCK_NORMAL : MMU_BLOCK_DEVICE);
+    }
+
+    /* Attr0 = 0xFF Normal write-back write-allocate, Attr1 = 0x00 Device. */
+    __asm__ volatile("msr mair_el2, %0" :: "r"(0x00000000000000FFUL));
+    __asm__ volatile("msr ttbr0_el2, %0"
+        :: "r"((uint64_t)(uintptr_t)nxp_imx8_l1_table));
+    /* T0SZ=32 (32-bit VA), 4 KB granule, cacheable inner-shareable table
+     * walks. Bits 31 and 23 are RES1 for TCR_EL2 when E2H is 0. */
+    __asm__ volatile("msr tcr_el2, %0"
+        :: "r"(0x0000000000013520UL | (1UL << 31) | (1UL << 23)));
+    __asm__ volatile("isb");
+    __asm__ volatile("tlbi alle2");
+    __asm__ volatile("dsb sy");
+
+    /* Drop anything an earlier stage left in the caches before turning them
+     * on, so no stale line surfaces once caching is live. */
+    aarch64_dcache_maint(0);
+    __asm__ volatile("ic iallu");
+    __asm__ volatile("dsb sy");
+    __asm__ volatile("isb");
+
+    sctlr |= (1UL << 0) | (1UL << 2) | (1UL << 12);   /* M | C | I */
+    __asm__ volatile("msr sctlr_el2, %0" :: "r"(sctlr));
+    __asm__ volatile("isb");
+}
+
+#if defined(DISK_EMMC) && !defined(SDHCI_SDMA_DISABLED)
+/* DMA cache maintenance for the SDMA path by address range. */
+static void nxp_imx8_dcache_range(uintptr_t start, uint32_t sz, int invalidate)
+{
+    uintptr_t line, end;
+    uint64_t ctr;
+
+    if (sz == 0)
+        return;
+    /* CTR_EL0.DminLine is log2 of the smallest data cache line, in words. */
+    __asm__ volatile("mrs %0, ctr_el0" : "=r"(ctr));
+    line = (uintptr_t)4 << ((ctr >> 16) & 0xF);
+
+    /* A DMA buffer sharing a cache line with CPU-written data cannot be kept
+     * coherent: the line's write-back overwrites the DMA data. */
+    if (((start | sz) & (line - 1)) != 0)
+        wolfBoot_printf("imx8mm: DMA buffer %p+%u not cache-line aligned\n",
+            (void*)start, (unsigned)sz);
+
+    end = (start + sz + line - 1) & ~(line - 1);
+    start &= ~(line - 1);
+    __asm__ volatile("dsb sy");
+    for (; start < end; start += line) {
+        if (invalidate)
+            __asm__ volatile("dc ivac, %0" :: "r"(start) : "memory");
+        else
+            __asm__ volatile("dc civac, %0" :: "r"(start) : "memory");
+    }
+    __asm__ volatile("dsb sy");
+    __asm__ volatile("isb");
+}
+
+void sdhci_platform_dma_prepare(void *buf, uint32_t sz, int is_write)
+{
+    /* Outbound data must reach memory before the controller reads it. Clean on
+     * inbound too: a dirty line over the buffer could evict onto DMA data. */
+    nxp_imx8_dcache_range((uintptr_t)buf, sz, 0);
+    (void)is_write;
+}
+
+void sdhci_platform_dma_complete(void *buf, uint32_t sz, int is_write)
+{
+    /* Inbound data landed in memory behind the cache's back. */
+    if (!is_write)
+        nxp_imx8_dcache_range((uintptr_t)buf, sz, 1);
+}
+#endif /* DISK_EMMC && !SDHCI_SDMA_DISABLED */
+#endif /* NXP_IMX8_MMU */
+#endif /* NXP_IMX8_BL33 */
 
 #if defined(NXP_IMX8_BL33) && defined(DEBUG) && defined(DEBUG_UART)
 /* Image bounds from hal/nxp_imx8.ld, used to say whether the faulting PC is
@@ -705,7 +812,9 @@ static void nxp_imx8_emmc_probe(void)
 
 void hal_init(void)
 {
-#ifdef NXP_IMX8_BL33
+#if defined(NXP_IMX8_BL33) && defined(NXP_IMX8_MMU)
+    nxp_imx8_mmu_enable();
+#elif defined(NXP_IMX8_BL33)
     nxp_imx8_icache_enable();
 #endif
 #ifdef DEBUG_UART

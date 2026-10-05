@@ -39,6 +39,15 @@
  * include/aarch64_arch.h: CNTFRQ_EL0 is set to 8 MHz by ATF. */
 #define TIMER_CLK_FREQ              8000000
 
+/* DRAM mapped Normal cacheable by the BL33 identity MMU (NXP_IMX8_MMU):
+ * PICO-IMX8MM 2 GB LPDDR4 at 0x40000000. Must be 1 GB aligned. */
+#ifndef NXP_IMX8_DRAM_BASE
+#define NXP_IMX8_DRAM_BASE          0x40000000ULL
+#endif
+#ifndef NXP_IMX8_DRAM_END
+#define NXP_IMX8_DRAM_END           0xC0000000ULL
+#endif
+
 /* Clock controller (CCM) */
 #define NXP_IMX8_CCM_BASE           0x30380000
 #define CCM_CCGR_SET(n)             (NXP_IMX8_CCM_BASE + 0x4004 + ((n) * 0x10))
